@@ -5,117 +5,90 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 export const userRegistration = async (req: Request, res: Response, next: NextFunction) => {
-    console.log('fgfgfgf');
-    
-    try {
-        const { name, email, password } = req.body;
-        
+   try {
+     const { name, email, password } = req.body;
+ 
+     // Check if user already exists
+     const existingUser = await User.findOne({ email });
+     if (existingUser) return next(new CustomError("Email already registered", 400));
+ 
+     // Hash password
+     const hashedPassword = await bcrypt.hash(password, 10);
+ 
+     // Create new user
+     const newUser = new User({ name, email, password: hashedPassword });
+     await newUser.save();
+ 
+     // Generate JWT tokens
+     const accessToken = jwt.sign({ id: newUser._id, email }, process.env.JWT_SECRET as string, { expiresIn: "15m" });
+     const refreshToken = jwt.sign({ id: newUser._id, email }, process.env.JWT_SECRET as string, { expiresIn: "7d" });
+ 
+     // Set refresh token in httpOnly cookie
+     res.cookie("refreshToken", refreshToken, { httpOnly: true, secure: true, sameSite: "strict" });
+     res.cookie("accessToken", accessToken, { httpOnly: true, secure: true, maxAge: 15 * 60 * 1000, sameSite: "strict" });
+ 
+     res.status(201).json({ message: "User registered successfully", user: { id: newUser._id, name, email }, accessToken });
+   } catch (error) {
+     next(new CustomError("Server error", 500));
+   }
+ };
 
-        // Check if user already exists
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-            return next(new CustomError("Email already registered", 400));
-        }
-
-        // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // Create new user
-        const newUser = new User({ name, email, password: hashedPassword });
-        await newUser.save();
-
-        // Generate JWT token
-        const accessToken = jwt.sign({ id: newUser._id, email }, process.env.JWT_SECRET  as string, { expiresIn: "15m" });
-        const refreshToken = jwt.sign({ id: newUser._id, email },process.env.JWT_SECRET  as string, { expiresIn: "7d" });
-
-        // Set refresh token in httpOnly cookie
-        res.cookie("refreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true, // Only use in HTTPS
-            sameSite: "strict"
-        });
-
-        // Send response
-        res.status(201).json({ 
-            message: "User registered successfully", 
-            user: { id: newUser._id, name, email },
-            accessToken
-        });
-
-    } catch (error) {
-        next(new CustomError("Server error", 500));
-    }
-};
-
-export const userlogin=async(req:Request,res:Response,next:NextFunction)=>{
-    console.log('ksdjkad');
-    
-    const {email,password}=req.body
-   
-    const user= await User.findOne({email,isAdmin:false})
-    if (!user) {
-        return next(new CustomError('user not found', 404))
+ export const userLogin = async (req: Request, res: Response, next: NextFunction) => {
+   try {
+     const { email, password } = req.body;
+     
+     const user = await User.findOne({ email, isAdmin: false });
+     if (!user) return next(new CustomError("User not found", 404));
+ 
+     const isPasswordValid = await bcrypt.compare(password, user.password);
+     if (!isPasswordValid) return next(new CustomError("Invalid email or password", 400));
+ 
+     // Generate Tokens
+     const accessToken = jwt.sign({ id: user._id, email }, process.env.JWT_SECRET as string, { expiresIn: "15m" });
+     const refreshToken = jwt.sign({ id: user._id, email }, process.env.JWT_SECRET as string, { expiresIn: "7d" });
+ 
+     // Set cookies
+     res.cookie("accessToken", accessToken, { httpOnly: true, secure: true, maxAge: 15 * 60 * 1000, sameSite: "strict" });
+     res.cookie("refreshToken", refreshToken, { httpOnly: true, secure: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: "strict" });
+ 
+     res.status(200).json({ message: "User logged in successfully", accessToken, user: { id: user._id, name: user.name, email: user.email } });
+   } catch (error) {
+     next(new CustomError("Server error", 500));
+   }
+ };
+ 
+ 
+export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
+   try {
+     const refreshToken = req.cookies.refreshToken; // Get refresh token from cookies
+ 
+     if (!refreshToken) {
+       return next(new CustomError("No refresh token provided", 403));
      }
-     const isPasswordValid= await bcrypt.compare(password,user.password)
-     if (!isPasswordValid) {
-        return next(new CustomError("Invalid email or password", 404));
-  
+ 
+     // Verify refresh token
+     const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET as string) as { id: string };
+ 
+     if (!decoded) {
+       return next(new CustomError("Invalid refresh token", 403));
      }
-     const token = jwt.sign(
-        {
-           id: user._id,
-           email: user.email,
-           role: 'User',
-        },
-        process.env.JWT_SECRET as string,
-        { expiresIn: "1m" }
-     );
-  
-     const refreshmentToken = jwt.sign(
-        {
-           id: user._id,
-           email: user.email,
-           role: 'User',
-  
-        },
-        process.env.JWT_SECRET as string,
-        { expiresIn: "7d" }
-     );
-      
-     await User.findByIdAndUpdate(user._id, { updatedAt: Date.now() }, { new: true });
-  
-     res.cookie('accessToken', token, {
-        httpOnly: true,
-        secure: true,
-        maxAge: 60 * 1000,
-        sameSite: 'none',
+ 
+     // Find user
+     const user = await User.findById(decoded.id);
+     if (!user) {
+       return next(new CustomError("User not found", 404));
+     }
+ 
+     // Generate new access token
+     const newAccessToken = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET as string, {
+       expiresIn: "15m",
      });
-     res.cookie('refreshToken', refreshmentToken, {
-        httpOnly: true,
-        secure: true,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        sameSite: 'none',
-     });
-  
-     res.cookie(`user`, "user", {
-        httpOnly: true,
-        secure: true,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        sameSite: 'none',
-     });
-  
-  
-  
-     res.status(200).json({
-        error: false,
-        message: `user Login successfully`,
-        accessToken: token,
-        refreshmentToken: refreshmentToken,
-        user: {
-           id: user._id,
-           name: user.name,
-           email: user.email,
-           role: 'User',
-        },
-     });
-}
+ 
+     // Send new access token in cookie & response
+     res.cookie("accessToken", newAccessToken, { httpOnly: true, secure: true, maxAge: 15 * 60 * 1000, sameSite: "strict" });
+ 
+     res.status(200).json({ accessToken: newAccessToken });
+   } catch (error) {
+     next(new CustomError("Failed to refresh token", 500));
+   }
+ };

@@ -10,7 +10,6 @@ const app =express()
 app.use(express.json()); 
 
 const PORT=process.env.PORT || 5000
-
 mongoose
 .connect(MONGO_URI)
 .then(() => console.log("MongoDB Connected ✅"))
@@ -18,12 +17,14 @@ mongoose
 app.get("/", (req: Request, res: Response) => {
   res.send("Server is running 🚀");
 });
-const corsOparations ={
-  origin :process.env.FRONTENT_URI,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', "X-MongoDb-Id"],
-credential:true
-}
+const FRONTEND_URI = process.env.FRONTEND_URI// ✅ Remove any accidental 
+
+const corsOparations = {
+  origin: FRONTEND_URI, 
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-MongoDb-Id"],
+  credentials: true,
+};
 
 app.use(cors(corsOparations))
 app.use('/api/auth',AuthROute)
